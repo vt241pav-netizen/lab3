@@ -89,6 +89,125 @@ class LightElementNodeWithHooks : LightNodeWithLifecycle
     }
 }
 
+// Інтерфейс ітератора
+interface IIterator<T>
+{
+    bool HasNext();
+    T Next();
+    void Reset();
+}
+
+// Конкретні ітератори
+class DepthFirstIterator : IIterator<LightNode>
+{
+    private Stack<LightNode> _stack = new Stack<LightNode>();
+    private LightNode _root;
+
+    public DepthFirstIterator(LightNode root)
+    {
+        _root = root;
+        Reset();
+    }
+
+    public bool HasNext() => _stack.Count > 0;
+
+    public LightNode Next()
+    {
+        if (!HasNext()) return null;
+        var current = _stack.Pop();
+
+        // Додаємо дітей у зворотньому порядку для правильного DFS
+        if (current is LightElementNode element)
+        {
+            var children = element.GetType().GetField("_children",
+                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)
+                ?.GetValue(element) as List<LightNode>;
+
+            if (children != null)
+            {
+                for (int i = children.Count - 1; i >= 0; i--)
+                    _stack.Push(children[i]);
+            }
+        }
+
+        return current;
+    }
+
+    public void Reset()
+    {
+        _stack.Clear();
+        _stack.Push(_root);
+    }
+}
+
+class BreadthFirstIterator : IIterator<LightNode>
+{
+    private Queue<LightNode> _queue = new Queue<LightNode>();
+    private LightNode _root;
+
+    public BreadthFirstIterator(LightNode root)
+    {
+        _root = root;
+        Reset();
+    }
+
+    public bool HasNext() => _queue.Count > 0;
+
+    public LightNode Next()
+    {
+        if (!HasNext()) return null;
+        var current = _queue.Dequeue();
+
+        if (current is LightElementNode element)
+        {
+            var children = element.GetType().GetField("_children",
+                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)
+                ?.GetValue(element) as List<LightNode>;
+
+            if (children != null)
+            {
+                foreach (var child in children)
+                    _queue.Enqueue(child);
+            }
+        }
+
+        return current;
+    }
+
+    public void Reset()
+    {
+        _queue.Clear();
+        _queue.Enqueue(_root);
+    }
+}
+
+// Агрегат (колекція)
+interface IHTMLDocument
+{
+    IIterator<LightNode> CreateDepthFirstIterator();
+    IIterator<LightNode> CreateBreadthFirstIterator();
+}
+
+class HTMLDocument : IHTMLDocument
+{
+    private LightNode _root;
+
+    public HTMLDocument(LightNode root)
+    {
+        _root = root;
+    }
+
+    public IIterator<LightNode> CreateDepthFirstIterator()
+    {
+        return new DepthFirstIterator(_root);
+    }
+
+    public IIterator<LightNode> CreateBreadthFirstIterator()
+    {
+        return new BreadthFirstIterator(_root);
+    }
+}
+
 // Клас для кольорового виведення в консоль
 class Logger
 {
@@ -435,6 +554,38 @@ class Program
         divWithHooks.Insert();
         Console.WriteLine($"Rendered: {divWithHooks.Render()}");
         divWithHooks.Remove();
+
+
+        Console.WriteLine("\n Iterator Demo ");
+        var rootDiv = new LightElementNode("html");
+        var body = new LightElementNode("body");
+        body.AddChild(new LightTextNode("Text 1"));
+        var p = new LightElementNode("p");
+        p.AddChild(new LightTextNode("Paragraph text"));
+        body.AddChild(p);
+        body.AddChild(new LightTextNode("Text 2"));
+        rootDiv.AddChild(body);
+
+        var doc = new HTMLDocument(rootDiv);
+
+        Console.WriteLine("Depth-First Traversal:");
+        var dfsIterator = doc.CreateDepthFirstIterator();
+        while (dfsIterator.HasNext())
+        {
+            var node = dfsIterator.Next();
+            Console.WriteLine($"  {node.GetType().Name}: {node.OuterHTML}");
+        }
+
+        Console.WriteLine("\nBreadth-First Traversal:");
+        var bfsIterator = doc.CreateBreadthFirstIterator();
+        while (bfsIterator.HasNext())
+        {
+            var node = bfsIterator.Next();
+            Console.WriteLine($"  {node.GetType().Name}: {node.OuterHTML}");
+        }
+
+
+
         Console.WriteLine("Завдання 1: Адаптер");
 
         // Демонстрація Logger
