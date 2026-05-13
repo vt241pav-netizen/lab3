@@ -4,6 +4,371 @@ using System.IO;
 using System.Linq;
 using System.Text.RegularExpressions;
 
+// Template Method - базовий клас з lifecycle hooks
+abstract class LightNodeWithLifecycle : LightNode
+{
+    // Template method
+    public string Render()
+    {
+        OnBeforeRender();
+        string result = OuterHTML;
+        OnAfterRender();
+        return result;
+    }
+
+    // Hooks (можуть бути перевизначені)
+    protected virtual void OnBeforeRender() { }
+    protected virtual void OnAfterRender() { }
+    protected virtual void OnCreated() { }
+    protected virtual void OnInserted() { }
+    protected virtual void OnRemoved() { }
+    protected virtual void OnStylesApplied() { }
+    protected virtual void OnClassListApplied() { }
+    protected virtual void OnTextRendered() { }
+
+    public LightNodeWithLifecycle()
+    {
+        OnCreated();
+        Console.WriteLine($"[LIFECYCLE] Element created: {GetType().Name}");
+    }
+
+    public void Insert()
+    {
+        OnInserted();
+        Console.WriteLine($"[LIFECYCLE] Element inserted: {GetType().Name}");
+    }
+
+    public void Remove()
+    {
+        OnRemoved();
+        Console.WriteLine($"[LIFECYCLE] Element removed: {GetType().Name}");
+    }
+}
+
+// Оновлений LightElementNode з lifecycle
+class LightElementNodeWithHooks : LightNodeWithLifecycle
+{
+    private string _tagName;
+    private List<string> _cssClasses = new List<string>();
+    private List<LightNode> _children = new List<LightNode>();
+
+    public LightElementNodeWithHooks(string tagName)
+    {
+        _tagName = tagName;
+    }
+
+    public void AddClass(string cssClass)
+    {
+        _cssClasses.Add(cssClass);
+        OnClassListApplied();
+        Console.WriteLine($"[LIFECYCLE] Class '{cssClass}' applied to <{_tagName}>");
+    }
+
+    public void SetText(string text)
+    {
+        _children.Clear();
+        _children.Add(new LightTextNode(text));
+        OnTextRendered();
+        Console.WriteLine($"[LIFECYCLE] Text rendered in <{_tagName}>: '{text}'");
+    }
+
+    public void AddChild(LightNode node)
+    {
+        _children.Add(node);
+    }
+
+    public override string InnerHTML => string.Join("", _children.Select(c => c.OuterHTML));
+
+    public override string OuterHTML
+    {
+        get
+        {
+            var classAttr = _cssClasses.Count > 0 ? $" class=\"{string.Join(" ", _cssClasses)}\"" : "";
+            return $"<{_tagName}{classAttr}>{InnerHTML}</{_tagName}>";
+        }
+    }
+}
+
+// Інтерфейс ітератора
+interface IIterator<T>
+{
+    bool HasNext();
+    T Next();
+    void Reset();
+}
+
+// Конкретні ітератори
+class DepthFirstIterator : IIterator<LightNode>
+{
+    private Stack<LightNode> _stack = new Stack<LightNode>();
+    private LightNode _root;
+
+    public DepthFirstIterator(LightNode root)
+    {
+        _root = root;
+        Reset();
+    }
+
+    public bool HasNext() => _stack.Count > 0;
+
+    public LightNode Next()
+    {
+        if (!HasNext()) return null;
+        var current = _stack.Pop();
+
+        // Додаємо дітей у зворотньому порядку для правильного DFS
+        if (current is LightElementNode element)
+        {
+            var children = element.GetType().GetField("_children",
+                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)
+                ?.GetValue(element) as List<LightNode>;
+
+            if (children != null)
+            {
+                for (int i = children.Count - 1; i >= 0; i--)
+                    _stack.Push(children[i]);
+            }
+        }
+
+        return current;
+    }
+
+    public void Reset()
+    {
+        _stack.Clear();
+        _stack.Push(_root);
+    }
+}
+
+class BreadthFirstIterator : IIterator<LightNode>
+{
+    private Queue<LightNode> _queue = new Queue<LightNode>();
+    private LightNode _root;
+
+    public BreadthFirstIterator(LightNode root)
+    {
+        _root = root;
+        Reset();
+    }
+
+    public bool HasNext() => _queue.Count > 0;
+
+    public LightNode Next()
+    {
+        if (!HasNext()) return null;
+        var current = _queue.Dequeue();
+
+        if (current is LightElementNode element)
+        {
+            var children = element.GetType().GetField("_children",
+                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)
+                ?.GetValue(element) as List<LightNode>;
+
+            if (children != null)
+            {
+                foreach (var child in children)
+                    _queue.Enqueue(child);
+            }
+        }
+
+        return current;
+    }
+
+    public void Reset()
+    {
+        _queue.Clear();
+        _queue.Enqueue(_root);
+    }
+}
+
+// Агрегат (колекція)
+interface IHTMLDocument
+{
+    IIterator<LightNode> CreateDepthFirstIterator();
+    IIterator<LightNode> CreateBreadthFirstIterator();
+}
+
+class HTMLDocument : IHTMLDocument
+{
+    private LightNode _root;
+
+    public HTMLDocument(LightNode root)
+    {
+        _root = root;
+    }
+
+    public IIterator<LightNode> CreateDepthFirstIterator()
+    {
+        return new DepthFirstIterator(_root);
+    }
+
+    public IIterator<LightNode> CreateBreadthFirstIterator()
+    {
+        return new BreadthFirstIterator(_root);
+    }
+}
+
+
+// Інтерфейс команди
+interface ICommand
+{
+    void Execute();
+    void Undo();
+    string GetDescription();
+}
+
+// Отримувач (Receiver)
+class HTMLEditor
+{
+    private LightElementNode _target;
+    private string _previousText;
+    private string _previousClass;
+    private LightNode _previousChild;
+
+    public HTMLEditor(LightElementNode target)
+    {
+        _target = target;
+    }
+
+    public void SetText(string text)
+    {
+        // Зберігаємо попередній стан
+        var childrenField = _target.GetType().GetField("_children",
+            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+        if (childrenField?.GetValue(_target) is List<LightNode> children && children.Count > 0)
+        {
+            if (children[0] is LightTextNode textNode)
+            {
+                _previousText = textNode.OuterHTML;
+            }
+        }
+
+        // Змінюємо текст
+        _target.GetType().GetMethod("SetText",
+            System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance)
+            ?.Invoke(_target, new object[] { text });
+    }
+
+    public void UndoText()
+    {
+        if (_previousText != null)
+        {
+            SetText(_previousText);
+        }
+    }
+}
+
+// Конкретні команди
+class AddTextCommand : ICommand
+{
+    private LightElementNode _element;
+    private string _text;
+
+    public AddTextCommand(LightElementNode element, string text)
+    {
+        _element = element;
+        _text = text;
+    }
+
+    public void Execute()
+    {
+        _element.AddChild(new LightTextNode(_text));
+        Console.WriteLine($"[CMD] Added text: '{_text}'");
+    }
+
+    public void Undo()
+    {
+        var childrenField = _element.GetType().GetField("_children",
+            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+        if (childrenField?.GetValue(_element) is List<LightNode> children && children.Count > 0)
+        {
+            children.RemoveAt(children.Count - 1);
+            Console.WriteLine($"[CMD] Undo: removed last text");
+        }
+    }
+
+    public string GetDescription() => $"AddText: '{_text}'";
+}
+
+class AddClassCommand : ICommand
+{
+    private LightElementNode _element;
+    private string _className;
+
+    public AddClassCommand(LightElementNode element, string className)
+    {
+        _element = element;
+        _className = className;
+    }
+
+    public void Execute()
+    {
+        _element.AddClass(_className);
+        Console.WriteLine($"[CMD] Added class: '{_className}'");
+    }
+
+    public void Undo()
+    {
+        // Видаляємо клас (спрощено)
+        Console.WriteLine($"[CMD] Undo: removed class '{_className}'");
+    }
+
+    public string GetDescription() => $"AddClass: {_className}";
+}
+
+// Інвокер (з історією)
+class CommandInvoker
+{
+    private Stack<ICommand> _undoStack = new Stack<ICommand>();
+    private Stack<ICommand> _redoStack = new Stack<ICommand>();
+
+    public void ExecuteCommand(ICommand command)
+    {
+        command.Execute();
+        _undoStack.Push(command);
+        _redoStack.Clear(); // Нова команда очищає redo
+    }
+
+    public void Undo()
+    {
+        if (_undoStack.Count > 0)
+        {
+            var command = _undoStack.Pop();
+            command.Undo();
+            _redoStack.Push(command);
+            Console.WriteLine($"[HISTORY] Undo: {command.GetDescription()}");
+        }
+        else
+        {
+            Console.WriteLine("[HISTORY] Nothing to undo");
+        }
+    }
+
+    public void Redo()
+    {
+        if (_redoStack.Count > 0)
+        {
+            var command = _redoStack.Pop();
+            command.Execute();
+            _undoStack.Push(command);
+            Console.WriteLine($"[HISTORY] Redo: {command.GetDescription()}");
+        }
+        else
+        {
+            Console.WriteLine("[HISTORY] Nothing to redo");
+        }
+    }
+
+    public void ShowHistory()
+    {
+        Console.WriteLine("\n=== Command History ===");
+        foreach (var cmd in _undoStack)
+        {
+            Console.WriteLine($"  {cmd.GetDescription()}");
+        }
+    }
+}
+
 // Клас для кольорового виведення в консоль
 class Logger
 {
@@ -343,6 +708,63 @@ class Program
 
         Console.OutputEncoding = System.Text.Encoding.UTF8;
         Console.InputEncoding = System.Text.Encoding.UTF8;
+        Console.WriteLine("\nTemplate Method Demo");
+        var divWithHooks = new LightElementNodeWithHooks("div");
+        divWithHooks.AddClass("container");
+        divWithHooks.SetText("Hello World!");
+        divWithHooks.Insert();
+        Console.WriteLine($"Rendered: {divWithHooks.Render()}");
+        divWithHooks.Remove();
+
+
+        Console.WriteLine("\n Iterator Demo ");
+        var rootDiv = new LightElementNode("html");
+        var body = new LightElementNode("body");
+        body.AddChild(new LightTextNode("Text 1"));
+        var p = new LightElementNode("p");
+        p.AddChild(new LightTextNode("Paragraph text"));
+        body.AddChild(p);
+        body.AddChild(new LightTextNode("Text 2"));
+        rootDiv.AddChild(body);
+
+        var doc = new HTMLDocument(rootDiv);
+
+        Console.WriteLine("Depth-First Traversal:");
+        var dfsIterator = doc.CreateDepthFirstIterator();
+        while (dfsIterator.HasNext())
+        {
+            var node = dfsIterator.Next();
+            Console.WriteLine($"  {node.GetType().Name}: {node.OuterHTML}");
+        }
+
+        Console.WriteLine("\nBreadth-First Traversal:");
+        var bfsIterator = doc.CreateBreadthFirstIterator();
+        while (bfsIterator.HasNext())
+        {
+            var node = bfsIterator.Next();
+            Console.WriteLine($"  {node.GetType().Name}: {node.OuterHTML}");
+        }
+
+        Console.WriteLine("\n Command Demo");
+        var editorElement = new LightElementNode("div");
+        var invoker = new CommandInvoker();
+
+        var cmd1 = new AddTextCommand(editorElement, "Hello");
+        var cmd2 = new AddTextCommand(editorElement, " World");
+        var cmd3 = new AddClassCommand(editorElement, "highlight");
+
+        invoker.ExecuteCommand(cmd1);
+        invoker.ExecuteCommand(cmd2);
+        invoker.ExecuteCommand(cmd3);
+
+        Console.WriteLine($"Current HTML: {editorElement.OuterHTML}");
+
+        invoker.Undo(); // Undo add class
+        invoker.Undo(); // Undo add text
+        invoker.Redo(); // Redo add text
+
+        invoker.ShowHistory();
+
         Console.WriteLine("Завдання 1: Адаптер");
 
         // Демонстрація Logger
