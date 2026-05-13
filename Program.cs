@@ -208,6 +208,167 @@ class HTMLDocument : IHTMLDocument
     }
 }
 
+
+// Інтерфейс команди
+interface ICommand
+{
+    void Execute();
+    void Undo();
+    string GetDescription();
+}
+
+// Отримувач (Receiver)
+class HTMLEditor
+{
+    private LightElementNode _target;
+    private string _previousText;
+    private string _previousClass;
+    private LightNode _previousChild;
+
+    public HTMLEditor(LightElementNode target)
+    {
+        _target = target;
+    }
+
+    public void SetText(string text)
+    {
+        // Зберігаємо попередній стан
+        var childrenField = _target.GetType().GetField("_children",
+            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+        if (childrenField?.GetValue(_target) is List<LightNode> children && children.Count > 0)
+        {
+            if (children[0] is LightTextNode textNode)
+            {
+                _previousText = textNode.OuterHTML;
+            }
+        }
+
+        // Змінюємо текст
+        _target.GetType().GetMethod("SetText",
+            System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance)
+            ?.Invoke(_target, new object[] { text });
+    }
+
+    public void UndoText()
+    {
+        if (_previousText != null)
+        {
+            SetText(_previousText);
+        }
+    }
+}
+
+// Конкретні команди
+class AddTextCommand : ICommand
+{
+    private LightElementNode _element;
+    private string _text;
+
+    public AddTextCommand(LightElementNode element, string text)
+    {
+        _element = element;
+        _text = text;
+    }
+
+    public void Execute()
+    {
+        _element.AddChild(new LightTextNode(_text));
+        Console.WriteLine($"[CMD] Added text: '{_text}'");
+    }
+
+    public void Undo()
+    {
+        var childrenField = _element.GetType().GetField("_children",
+            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+        if (childrenField?.GetValue(_element) is List<LightNode> children && children.Count > 0)
+        {
+            children.RemoveAt(children.Count - 1);
+            Console.WriteLine($"[CMD] Undo: removed last text");
+        }
+    }
+
+    public string GetDescription() => $"AddText: '{_text}'";
+}
+
+class AddClassCommand : ICommand
+{
+    private LightElementNode _element;
+    private string _className;
+
+    public AddClassCommand(LightElementNode element, string className)
+    {
+        _element = element;
+        _className = className;
+    }
+
+    public void Execute()
+    {
+        _element.AddClass(_className);
+        Console.WriteLine($"[CMD] Added class: '{_className}'");
+    }
+
+    public void Undo()
+    {
+        // Видаляємо клас (спрощено)
+        Console.WriteLine($"[CMD] Undo: removed class '{_className}'");
+    }
+
+    public string GetDescription() => $"AddClass: {_className}";
+}
+
+// Інвокер (з історією)
+class CommandInvoker
+{
+    private Stack<ICommand> _undoStack = new Stack<ICommand>();
+    private Stack<ICommand> _redoStack = new Stack<ICommand>();
+
+    public void ExecuteCommand(ICommand command)
+    {
+        command.Execute();
+        _undoStack.Push(command);
+        _redoStack.Clear(); // Нова команда очищає redo
+    }
+
+    public void Undo()
+    {
+        if (_undoStack.Count > 0)
+        {
+            var command = _undoStack.Pop();
+            command.Undo();
+            _redoStack.Push(command);
+            Console.WriteLine($"[HISTORY] Undo: {command.GetDescription()}");
+        }
+        else
+        {
+            Console.WriteLine("[HISTORY] Nothing to undo");
+        }
+    }
+
+    public void Redo()
+    {
+        if (_redoStack.Count > 0)
+        {
+            var command = _redoStack.Pop();
+            command.Execute();
+            _undoStack.Push(command);
+            Console.WriteLine($"[HISTORY] Redo: {command.GetDescription()}");
+        }
+        else
+        {
+            Console.WriteLine("[HISTORY] Nothing to redo");
+        }
+    }
+
+    public void ShowHistory()
+    {
+        Console.WriteLine("\n=== Command History ===");
+        foreach (var cmd in _undoStack)
+        {
+            Console.WriteLine($"  {cmd.GetDescription()}");
+        }
+    }
+}
+
 // Клас для кольорового виведення в консоль
 class Logger
 {
@@ -584,7 +745,25 @@ class Program
             Console.WriteLine($"  {node.GetType().Name}: {node.OuterHTML}");
         }
 
+        Console.WriteLine("\n Command Demo");
+        var editorElement = new LightElementNode("div");
+        var invoker = new CommandInvoker();
 
+        var cmd1 = new AddTextCommand(editorElement, "Hello");
+        var cmd2 = new AddTextCommand(editorElement, " World");
+        var cmd3 = new AddClassCommand(editorElement, "highlight");
+
+        invoker.ExecuteCommand(cmd1);
+        invoker.ExecuteCommand(cmd2);
+        invoker.ExecuteCommand(cmd3);
+
+        Console.WriteLine($"Current HTML: {editorElement.OuterHTML}");
+
+        invoker.Undo(); // Undo add class
+        invoker.Undo(); // Undo add text
+        invoker.Redo(); // Redo add text
+
+        invoker.ShowHistory();
 
         Console.WriteLine("Завдання 1: Адаптер");
 
