@@ -208,6 +208,127 @@ class HTMLDocument : IHTMLDocument
     }
 }
 
+// Інтерфейс відвідувача
+interface IVisitor
+{
+    void Visit(LightTextNode textNode);
+    void Visit(LightElementNode elementNode);
+}
+
+// Елементи, які можна відвідати
+interface IVisitable
+{
+    void Accept(IVisitor visitor);
+}
+
+// Модифікуємо існуючі класи
+class LightTextNodeVisitable : LightTextNode, IVisitable
+{
+    public LightTextNodeVisitable(string text) : base(text) { }
+
+    public void Accept(IVisitor visitor)
+    {
+        visitor.Visit(this);
+    }
+}
+
+class LightElementNodeVisitable : LightElementNode, IVisitable
+{
+    public LightElementNodeVisitable(string tagName, string displayType = "block", bool isSelfClosing = false)
+        : base(tagName, displayType, isSelfClosing) { }
+
+    public void Accept(IVisitor visitor)
+    {
+        visitor.Visit(this);
+        // Відвідуємо дітей
+        var childrenField = this.GetType().BaseType.GetField("_children",
+            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+        if (childrenField?.GetValue(this) is List<LightNode> children)
+        {
+            foreach (var child in children.OfType<IVisitable>())
+            {
+                child.Accept(visitor);
+            }
+        }
+    }
+}
+
+// Конкретні відвідувачі
+class HTMLValidator : IVisitor
+{
+    private List<string> _errors = new List<string>();
+    private List<string> _warnings = new List<string>();
+
+    public void Visit(LightTextNode textNode)
+    {
+        // Перевіряємо, чи текст не порожній
+        if (string.IsNullOrWhiteSpace(textNode.OuterHTML))
+        {
+            _warnings.Add("Empty text node found");
+        }
+    }
+
+    public void Visit(LightElementNode elementNode)
+    {
+        // Перевіряємо теги
+        var tagName = elementNode.GetType().GetField("_tagName",
+            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)
+            ?.GetValue(elementNode) as string;
+
+        if (tagName == "script")
+        {
+            _warnings.Add("Script tag detected - potential security risk");
+        }
+
+        if (tagName == "div" && elementNode.OuterHTML.Length > 1000)
+        {
+            _errors.Add($"Div element too large: {elementNode.OuterHTML.Length} chars");
+        }
+    }
+
+    public void PrintReport()
+    {
+        Console.WriteLine("\nValidation Report ");
+        Console.WriteLine($"Errors: {_errors.Count}");
+        foreach (var err in _errors) Console.WriteLine($"  ERROR: {err}");
+        Console.WriteLine($"Warnings: {_warnings.Count}");
+        foreach (var warn in _warnings) Console.WriteLine($"  WARNING: {warn}");
+    }
+}
+
+class ClassCounter : IVisitor
+{
+    private Dictionary<string, int> _classUsage = new Dictionary<string, int>();
+
+    public void Visit(LightTextNode textNode) { }
+
+    public void Visit(LightElementNode elementNode)
+    {
+        // Отримуємо класи (спрощено)
+        var classesField = elementNode.GetType().GetField("_cssClasses",
+            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+        if (classesField?.GetValue(elementNode) is List<string> classes)
+        {
+            foreach (var className in classes)
+            {
+                if (_classUsage.ContainsKey(className))
+                    _classUsage[className]++;
+                else
+                    _classUsage[className] = 1;
+            }
+        }
+    }
+
+    public void PrintStats()
+    {
+        Console.WriteLine("\n CSS Class Statistics ");
+        foreach (var kvp in _classUsage)
+        {
+            Console.WriteLine($"  .{kvp.Key}: {kvp.Value} time(s)");
+        }
+    }
+}
+
 // Клас для кольорового виведення в консоль
 class Logger
 {
@@ -584,7 +705,29 @@ class Program
             Console.WriteLine($"  {node.GetType().Name}: {node.OuterHTML}");
         }
 
+        Console.WriteLine("\n Visitor Demo ");
+        // Створюємо HTML структуру
+        var htmlDoc = new LightElementNodeVisitable("html");
+        var bodyVis = new LightElementNodeVisitable("body");
+        bodyVis.AddClass("main");
+        bodyVis.AddClass("content");
 
+        var divVis = new LightElementNodeVisitable("div");
+        divVis.AddClass("container");
+        divVis.AddChild(new LightTextNodeVisitable("Hello World"));
+
+        bodyVis.AddChild(divVis);
+        htmlDoc.AddChild(bodyVis);
+
+        // Відвідувачі
+        var validator = new HTMLValidator();
+        var counter = new ClassCounter();
+
+        htmlDoc.Accept(validator);
+        htmlDoc.Accept(counter);
+
+        validator.PrintReport();
+        counter.PrintStats();
 
         Console.WriteLine("Завдання 1: Адаптер");
 
