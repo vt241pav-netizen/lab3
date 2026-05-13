@@ -4,6 +4,91 @@ using System.IO;
 using System.Linq;
 using System.Text.RegularExpressions;
 
+// Template Method - базовий клас з lifecycle hooks
+abstract class LightNodeWithLifecycle : LightNode
+{
+    // Template method
+    public string Render()
+    {
+        OnBeforeRender();
+        string result = OuterHTML;
+        OnAfterRender();
+        return result;
+    }
+
+    // Hooks (можуть бути перевизначені)
+    protected virtual void OnBeforeRender() { }
+    protected virtual void OnAfterRender() { }
+    protected virtual void OnCreated() { }
+    protected virtual void OnInserted() { }
+    protected virtual void OnRemoved() { }
+    protected virtual void OnStylesApplied() { }
+    protected virtual void OnClassListApplied() { }
+    protected virtual void OnTextRendered() { }
+
+    public LightNodeWithLifecycle()
+    {
+        OnCreated();
+        Console.WriteLine($"[LIFECYCLE] Element created: {GetType().Name}");
+    }
+
+    public void Insert()
+    {
+        OnInserted();
+        Console.WriteLine($"[LIFECYCLE] Element inserted: {GetType().Name}");
+    }
+
+    public void Remove()
+    {
+        OnRemoved();
+        Console.WriteLine($"[LIFECYCLE] Element removed: {GetType().Name}");
+    }
+}
+
+// Оновлений LightElementNode з lifecycle
+class LightElementNodeWithHooks : LightNodeWithLifecycle
+{
+    private string _tagName;
+    private List<string> _cssClasses = new List<string>();
+    private List<LightNode> _children = new List<LightNode>();
+
+    public LightElementNodeWithHooks(string tagName)
+    {
+        _tagName = tagName;
+    }
+
+    public void AddClass(string cssClass)
+    {
+        _cssClasses.Add(cssClass);
+        OnClassListApplied();
+        Console.WriteLine($"[LIFECYCLE] Class '{cssClass}' applied to <{_tagName}>");
+    }
+
+    public void SetText(string text)
+    {
+        _children.Clear();
+        _children.Add(new LightTextNode(text));
+        OnTextRendered();
+        Console.WriteLine($"[LIFECYCLE] Text rendered in <{_tagName}>: '{text}'");
+    }
+
+    public void AddChild(LightNode node)
+    {
+        _children.Add(node);
+    }
+
+    public override string InnerHTML => string.Join("", _children.Select(c => c.OuterHTML));
+
+    public override string OuterHTML
+    {
+        get
+        {
+            var classAttr = _cssClasses.Count > 0 ? $" class=\"{string.Join(" ", _cssClasses)}\"" : "";
+            return $"<{_tagName}{classAttr}>{InnerHTML}</{_tagName}>";
+        }
+    }
+}
+
 // Клас для кольорового виведення в консоль
 class Logger
 {
@@ -343,6 +428,13 @@ class Program
 
         Console.OutputEncoding = System.Text.Encoding.UTF8;
         Console.InputEncoding = System.Text.Encoding.UTF8;
+        Console.WriteLine("\nTemplate Method Demo");
+        var divWithHooks = new LightElementNodeWithHooks("div");
+        divWithHooks.AddClass("container");
+        divWithHooks.SetText("Hello World!");
+        divWithHooks.Insert();
+        Console.WriteLine($"Rendered: {divWithHooks.Render()}");
+        divWithHooks.Remove();
         Console.WriteLine("Завдання 1: Адаптер");
 
         // Демонстрація Logger
