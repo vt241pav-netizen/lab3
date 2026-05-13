@@ -208,6 +208,111 @@ class HTMLDocument : IHTMLDocument
     }
 }
 
+// Інтерфейс стану
+interface IElementState
+{
+    void Render(LightElementNodeStateful element);
+    void HandleClick(LightElementNodeStateful element);
+    string GetStateName();
+}
+
+// Конкретні стани
+class VisibleState : IElementState
+{
+    public void Render(LightElementNodeStateful element)
+    {
+        Console.WriteLine($"[STATE] Rendering {element.TagName} as VISIBLE");
+        // Нормальний рендеринг
+    }
+
+    public void HandleClick(LightElementNodeStateful element)
+    {
+        Console.WriteLine($"[STATE] Click on VISIBLE element - performing action");
+        element.SetState(new HiddenState()); // Зміна стану при кліку
+    }
+
+    public string GetStateName() => "Visible";
+}
+
+class HiddenState : IElementState
+{
+    public void Render(LightElementNodeStateful element)
+    {
+        Console.WriteLine($"[STATE] Rendering {element.TagName} as HIDDEN (display: none)");
+    }
+
+    public void HandleClick(LightElementNodeStateful element)
+    {
+        Console.WriteLine($"[STATE] Click on HIDDEN element - no effect");
+    }
+
+    public string GetStateName() => "Hidden";
+}
+
+class EditingState : IElementState
+{
+    public void Render(LightElementNodeStateful element)
+    {
+        Console.WriteLine($"[STATE] Rendering {element.TagName} as EDITABLE (contenteditable=true)");
+    }
+
+    public void HandleClick(LightElementNodeStateful element)
+    {
+        Console.WriteLine($"[STATE] Click on EDITABLE element - opening editor");
+        element.SetState(new VisibleState()); // Повертаємось до видимого після редагування
+    }
+
+    public string GetStateName() => "Editing";
+}
+
+class DisabledState : IElementState
+{
+    public void Render(LightElementNodeStateful element)
+    {
+        Console.WriteLine($"[STATE] Rendering {element.TagName} as DISABLED (opacity: 0.5, pointer-events: none)");
+    }
+
+    public void HandleClick(LightElementNodeStateful element)
+    {
+        Console.WriteLine($"[STATE] Click on DISABLED element - ignored");
+    }
+
+    public string GetStateName() => "Disabled";
+}
+
+// Контекст (елемент зі станом)
+class LightElementNodeStateful : LightElementNode
+{
+    private IElementState _state;
+    public string TagName { get; private set; }
+
+    public LightElementNodeStateful(string tagName) : base(tagName)
+    {
+        TagName = tagName;
+        _state = new VisibleState(); // Початковий стан
+        Console.WriteLine($"[STATE] Created {tagName} in {_state.GetStateName()} state");
+    }
+
+    public void SetState(IElementState state)
+    {
+        Console.WriteLine($"[STATE] {TagName} changing state: {_state.GetStateName()} -> {state.GetStateName()}");
+        _state = state;
+    }
+
+    public IElementState GetState() => _state;
+
+    public void Render()
+    {
+        _state.Render(this);
+        base.OuterHTML.ToString(); // Викликаємо рендеринг
+    }
+
+    public void Click()
+    {
+        _state.HandleClick(this);
+    }
+}
+
 // Клас для кольорового виведення в консоль
 class Logger
 {
@@ -584,7 +689,20 @@ class Program
             Console.WriteLine($"  {node.GetType().Name}: {node.OuterHTML}");
         }
 
+        Console.WriteLine("\n State Demo ");
+        var statefulDiv = new LightElementNodeStateful("div");
 
+        statefulDiv.Render();
+        statefulDiv.Click(); // Змінює стан на Hidden
+
+        statefulDiv.Render();
+        statefulDiv.SetState(new EditingState());
+        statefulDiv.Render();
+        statefulDiv.Click(); // Повертає на Visible
+
+        statefulDiv.SetState(new DisabledState());
+        statefulDiv.Render();
+        statefulDiv.Click(); // Ніякого ефекту
 
         Console.WriteLine("Завдання 1: Адаптер");
 
